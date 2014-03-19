@@ -6,6 +6,19 @@ import curses.textpad
 import logging
 import os
 
+logging.basicConfig(level=logging.DEBUG,
+		format='%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s',
+                    filename='/tmp/svnview.log',
+                    filemode='w')
+class line:
+	regions = []
+	def __init__(self):
+		self.regions = []
+	def append_region(self, str, endCol = 0, color = "TEXT"):
+		self.regions.append((color, endCol, str.replace("\n", "")))
+	def get_regions(self):
+		return self.regions
+
 class window_base:
 	app = None
 	screen = None
@@ -95,9 +108,16 @@ class window(window_base):
 
 		(maxRow, maxCol) = self.screen.getmaxyx() 
 		#title line
+		self.isBorder = False
 		self.beginRow = 0
 		self.endRow = maxRow
 		self.clear()
+	
+	def border(self):
+		self.isBorder = True
+		(maxRow, maxCol) = self.screen.getmaxyx() 
+		self.beginRow = 1
+		self.endRow = maxRow - 1
 
 	def clear(self):
 		self.title = None
@@ -117,37 +137,55 @@ class window(window_base):
 		self.endRow = maxRow
 		self.adjust_cursor()
 
-	def add_line(self, str, **args):
-		self.lineList.append((str, args))
+	def add_line_str(self, str, **lineinfo):
+		li = line()
+		li.append_region(str)
+		self.lineList.append((li, lineinfo))
+		self.dirty = True
+		logging.debug("[%s] add line:%s", self.name, str)
+
+	def add_line(self, line, **lineinfo):
+		self.lineList.append((line, lineinfo))
 		self.dirty = True
 
-	def get_line(self, line):
-		if line < len(self.lineList):
-			return self.lineList[line]
-		return (None, None)
+	def get_line_info(self, lineno):
+		if lineno < len(self.lineList):
+			(line, info) = self.lineList[lineno]
+			return info
 
 	def get_cursor(self):
 		return self.cursor
+
+	def fill_string(self, str):
+		str = str or ""
+		(maxRow, maxCol) = self.screen.getmaxyx() 
+		# return str + (maxCol - len(str)) * ' '
+		return str.ljust(maxCol, ' ')
 
 	def update(self):
 		#draw title
 		drawLine = self.beginRow
 
-		# if self.is_active():
-		# 	self.screen.border()
+		if self.isBorder:
+			self.screen.border()
 
 		colorKey = self.is_active() and "ACTIVE_TITLE" or "TITLE"
 		logging.debug("win(%s) active:%d", self.name, self.is_active())
-		self.screen.addstr(drawLine, 1, self.title or "", self.colorScheme.get_color(colorKey))
+		self.screen.addstr(drawLine, 1, self.fill_string(self.title), self.colorScheme.get_color(colorKey))
 		drawLine += 1
 
-		def draw_line(drawLine, str, lineRow):
+		def draw_line(drawLine, line, lineRow):
 			if drawLine >= self.endRow:
 				return False
-			if self.cursor == lineRow:
-				self.screen.addstr(drawLine, 1, str, curses.A_REVERSE)
-			else:
-				self.screen.addstr(drawLine, 1, str, self.colorScheme.get_color("TEXT"))
+			beginCol = 0
+			for (color, endCol, str) in line.regions:
+				if self.cursor == lineRow:
+					col = curses.A_REVERSE
+				else:
+					col = self.colorScheme.get_color(color)
+				# logging.debug("line=%d,col=%d,str=%s,endCol=%d", drawLine, beginCol, str, endCol)
+				self.screen.addstr(drawLine, beginCol, str.ljust(endCol), col)
+				beginCol += endCol
 			return True
 
 		for i in range(self.viewLine, len(self.lineList)):
@@ -200,8 +238,9 @@ class color_scheme:
 
 
 class edit(window_base):
-	perfix = ":"
+	prefix = ":"
 	resultCallBack = None
+	gatherStr = None
 	
 	def __init__(self, app, screen, colorScheme):
 		window_base.__init__(self, app, screen, colorScheme)
@@ -211,24 +250,56 @@ class edit(window_base):
 		logging.debug("x=%d,y=%d,w=%d,h=%d", x, y, w-1, h)
 		#curses.textpad.rectangle(screen,y,x,y+h,x+w)
 	
-	def edit(self):
-		self.screen.addstr(0, 0, self.perfix)
+	def hide_edit(self):
+		self.screen.clear()
+		self.gatherStr = None
+		def show_gather():
+			if self.gatherStr:
+				self.screen.addstr(0, 0, self.gatherStr)
+			else:
+				self.screen.addstr(0, 0, self.prefix)
+		def hide_gather():
+			self.gatherStr = self.textbox.gather()[0:-1]
+			prefixLen = len(self.prefix)
+			replaceStr = self.prefix + (len(self.gatherStr) - len(self.prefix)) * '*'
+			self.screen.addstr(0, 0, replaceStr)
+			logging.debug("gather str=%s, %s", self.gatherStr, replaceStr)
+
+		while 1:
+			hide_gather()
+			ch = self.screen.getch()
+			show_gather()
+			ret = self.textbox.do_command(ch)
+			if not ret:
+				break
+		# self.screen.refresh()
+	def nohide_edit(self):
+		self.screen.clear()
+		self.screen.addstr(0, 0, self.prefix)
 		self.textbox.edit()
+	def edit(self):
+		self.nohide_edit()
 
 	def gather(self):
 		inputStr = self.textbox.gather()
-		return inputStr[len(self.perfix):-1]
+		return inputStr[len(self.prefix):-1]
+
+	def set_prefix(self, str):
+		self.prefix = str
 
 	def on_result(self, func):
 		self.resultCallBack = func
 
-	def on_active(self):
+	def on_active(self, hide=False):
 		if self.is_active():
-			self.edit()
+			if hide:
+				self.hide_edit()
+			else:
+				self.nohide_edit()
 			if self.resultCallBack:
-				self.resultCallBack(self.gather())
-			self.active(False, True)
+				self.resultCallBack(self, self.gather())
 			self.app.redraw()
+			self.active(False, True)
 
 # mode list
 NORMAL_MODE = 0
@@ -281,6 +352,9 @@ class screen_view:
 	def get_name(self):
 		return self.name
 
+	def is_show(self):
+		return self.win.is_show()
+
 	def get_view_region(self):
 		global stdscr
 		def calValue(val, defVal, maxVal):
@@ -322,7 +396,9 @@ class app:
 
 		# view = screen_view(self, name, beginRow, endRow, beginCol, endCol)
 		# view.init_edit()
-		self.command_edit = self.new_edit("_command", -2, -1)
+		view = screen_view(self, "command", -1, -1)
+		view.init_edit()
+		self.command_edit = view.get_win()
 
 	def set_mode(self, mode):
 		modes = dict(zip([NORMAL_MODE, SWITCH_MODE, COMMAND_MODE], ["normal", "switch", "command"]))
@@ -359,7 +435,6 @@ class app:
 
 		self.maxRow = row
 		self.maxCol = col
-		#regions = []
 		def insert_region(br, er, bc, ec):
 			self.maxRow = min(br, self.maxRow)
 			self.maxCol = min(bc, self.maxCol)
@@ -412,7 +487,7 @@ class app:
 		self.curActiveView = activeView
 		if activeView:
 			logging.debug("cur active view:%s", activeView.get_name())
-		activeView.get_win().active(True, False)
+			activeView.get_win().active(True, False)
 
 	def transform_key(self, key):
 		keyname = curses.keyname(key)
@@ -450,21 +525,23 @@ class app:
 			valfunc = None
 			reverse = False
 			if key == 'j':
-				views = [view for view in self.views if view.get_begin_row() > curActiveView.get_begin_row()]
+				views = [view for view in self.views if view.is_show() and view.get_begin_row() > curActiveView.get_begin_row()]
 				valfunc = lambda v: v.get_begin_row()
 			elif key == 'k':
-				views = [view for view in self.views if view.get_begin_row() < curActiveView.get_begin_row()]
+				views = [view for view in self.views if view.is_show() and view.get_begin_row() < curActiveView.get_begin_row()]
 				valfunc = lambda v: v.get_begin_row()
 				reverse = True
 			elif key == 'l':
-				views = [view for view in self.views if view.get_begin_col() > curActiveView.get_begin_col()]
+				views = [view for view in self.views if view.is_show() and view.get_begin_col() > curActiveView.get_begin_col()]
 				valfunc = lambda v: v.get_begin_col()
 			elif key == 'h':
-				views = [view for view in self.views if view.get_begin_col() < curActiveView.get_begin_col()]
+				views = [view for view in self.views if view.is_show() and view.get_begin_col() < curActiveView.get_begin_col()]
 				valfunc = lambda v: v.get_begin_col()
 				reverse = True
 			if len(views):
 				views = sorted(views, key = valfunc, reverse = reverse)
+				for view in views:
+					logging.debug("view name=%s", view.name)
 				views[0].get_win().active(True)
 			return True
 

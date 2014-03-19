@@ -5,15 +5,8 @@ import os
 import traceback
 import curses
 import curses_ext
-import logging
-
-logging.basicConfig(level=logging.DEBUG,
-		format='%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s',
-                    filename='/tmp/svnview.log',
-                    filemode='w')
 
 global app
-
 
 def add_line(win, str, process):
 	win.add_line(str, process = process)
@@ -101,6 +94,5 @@ if __name__ == "__main__":
 	try:
 		run()
 	except Exception, err:
-		logging.error(err)
 		error = err
 	end(error)
