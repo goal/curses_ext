@@ -16,8 +16,9 @@ class client:
 		save = False
 		return retcode, username, password, save
 
-	def log(self):
-		return self.client.log("./", limit=50, discover_changed_paths=True)
+	def log(self, end_revision):
+		end_revision = end_revision or pysvn.Revision(pysvn.opt_revision_kind.base)
+		return self.client.log("./", limit=50, revision_end=end_revision, discover_changed_paths=True)
 
 	def next_log(self):
 		return self.log()

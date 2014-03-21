@@ -16,97 +16,84 @@ global client
 username = None
 password = None
 
-def add_line(win, line, process, **args):
-	lineinfo = {}
-	lineinfo["process"] = process
-	lineinfo["args"] = args
-	win.add_line(line, **lineinfo)
-
-def deal_line(win, line):
-	info = win.get_line_info(line)
-	if not info: return
-	if not info["process"]: return
-	info["process"](win, **(info["args"]))
-
-def get_line_args(win, line):
-	info = win.get_line_info(line)
-	if not info: return
-	return info["args"]
-
 def date_format(date):
 	return time.strftime('%Y-%m-%d %A %X %Z',time.localtime(date))
-
-def cmd_df(showWin):
-	showWin.set_title("df info")
-	def process(win, log):
-		#resultWin.clear()
-		win = app.get_window("filelist")
-		win.show(True)
-		win.add_line_str(log.message)
-
-	for log in client.log():
-		message = "%s %s %s"%(log.author, date_format(log.date), log.message)
-		line = curses_ext.line()
-		line.append_region(date_format(log.date), 40, "TEXT_BLUE")
-		line.append_region(log.author, 15, "TEXT_RED")
-		line.append_region("%d"%log.revision.number, 15, "TEXT_BLUE")
-		line.append_region(log.message, 50, "TEXT_RED")
-		add_line(showWin, line, process, log=log)
-
 
 def init_content_window(window):
 	global app
 	window.show(True)
+	global end_revision
+	end_revision = None
 
-	def cursor_changed(win, line):
-		info = get_line_args(win, line)
+	def cursor_changed(win):
+		cursor = win.get_cursor()
+		info = win.get_line_info(cursor)
 		if not info: return
-		win = app.get_window("filelist")
-		win.clear()
-		win.show(True)
+
+		winFileList = app.get_window("filelist")
+		winFileList.clear()
+		winFileList.show(True)
 		log = info["log"]
 		for changePath in log.changed_paths:
-			win.add_line_str(changePath.path, log=log, path=changePath.path)
+			winFileList.add_line_str(changePath.path, log=log, path=changePath.path)
+		if (win.get_rows() - win.get_cursor()) < 5:
+			cmd_log(win)
+
+
+	def cmd_log(win):
+		global end_revision
+		#win.set_title("svn log")
+		logging.debug("cmd log")
+		logs = client.log(end_revision)
+		if not len(logs): return
+		for log in logs:
+			message = "%s %s %s"%(log.author, date_format(log.date), log.message)
+			line = curses_ext.line()
+			line.append_region(date_format(log.date), 40, "TEXT_BLUE")
+			line.append_region(log.author, 15, "TEXT_RED")
+			line.append_region("%d"%log.revision.number, 15, "TEXT_BLUE")
+			line.append_region(log.message, 50, "TEXT_RED")
+			win.add_line(line, log=log)
+		end_revision = logs[-1].revision
+
+	def on_key_enter(win):
+		#resultWin.clear()
+		cursor = win.get_cursor()
+		info = win.get_line_info(cursor)
+		if not info: return
 
 		win = app.get_window("result")
 		win.clear()
 		win.show(True)
-		prev = pysvn.Revision(pysvn.opt_revision_kind.previous)
+		log = info["log"]
+		#prev = pysvn.Revision(pysvn.opt_revision_kind.committed)
+		prev = pysvn.Revision(pysvn.opt_revision_kind.number, log.revision.number - 1)
 		diff_text = client.diff(log.revision, prev)
 		for text_line in diff_text.splitlines():
 			# logging.debug("diff_text = %s", text_line)
 			win.add_line_str(text_line)
 
-
 	def hook(self, ch):
 		if ch == 'q':
 			app.quit()
 		elif ch == 'd':
-			cmd_df(self)
-		elif ch == 'j':
-			self.cursor_shift(1)
-			cursor_changed(self, self.get_cursor())
-		elif ch == 'k':
-			self.cursor_shift(-1)
-			cursor_changed(self, self.get_cursor())
+			cmd_log(self)
 		elif ch == "KEY_ENTER":
-			deal_line(self, self.get_cursor())
-	window.bind_keys([], hook)
+			on_key_enter(self)
+	window.bind_keys(['q', 'd', 'KEY_ENTER'], hook)
+	window.bind_cursor_changed(cursor_changed)
 
 def init_result_window(window):
 	def hook(self, ch):
 		if ch == 'q':
 			self.show(False)
-		elif ch == 'j':
-			self.cursor_shift(1)
-		elif ch == 'k':
-			self.cursor_shift(-1)
 
-	window.bind_keys([], hook)
+	window.bind_keys(['q'], hook)
 
 def init_filelist_window(window):
-	def cursor_changed(win, line):
-		info = win.get_line_info(line)
+	def cursor_changed(win):
+		cursor = win.get_cursor()
+		info = win.get_line_info(cursor)
 		if not info: return
 		log = info["log"]
 		path = info["path"]
@@ -119,14 +106,9 @@ def init_filelist_window(window):
 	def hook(self, ch):
 		if ch == 'q':
 			self.show(False)
-		elif ch == 'j':
-			self.cursor_shift(1)
-			cursor_changed(self, self.get_cursor())
-		elif ch == 'k':
-			self.cursor_shift(-1)
-			cursor_changed(self, self.get_cursor())
 
-	window.bind_keys([], hook)
+	window.bind_keys(['q'], hook)
+	window.bind_cursor_changed(cursor_changed)
 
 def login():
 	global username

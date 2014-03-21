@@ -27,8 +27,8 @@ class window_base:
 	colorScheme = None
 	dirty = True
 	name = ""
-	key_hook = None
-	key_hook_tbl = None
+	key_hook_tbl = {}
+	cursor_changed = None
 	def __init__(self, app, screen, colorScheme):
 		self.app = app
 		self.screen = screen
@@ -39,6 +39,7 @@ class window_base:
 		self.actived = False
 		self.colorScheme = colorScheme
 		self.dirty = True
+		self.key_hook_tbl = {}
 
 	def set_name(self, name):
 		self.name = name
@@ -69,26 +70,21 @@ class window_base:
 		return
 
 	def bind_keys(self, keys, hook):
-		if not len(keys):
-			self.key_hook = hook
-			return
-		if not self.key_hook_tbl:
-			self.key_hook_tbl = []
 		for key in keys:
-			if not self.key_hook_tbl[key]:
+			if not self.key_hook_tbl.has_key(key):
 				self.key_hook_tbl[key] = []
 			self.key_hook_tbl[key].append(hook)
 	
+	def on_key_input(self, ch):
+		return False
 
 	def dispatch_event(self, ch):
-		if self.key_hook: 
-			self.key_hook(self, ch)
-			return True
-		if self.key_hook_tbl and self.key_hook_tbl[ch]:
+		if self.key_hook_tbl and self.key_hook_tbl.has_key(ch):
 			for fun in self.key_hook_tbl[ch]:
 				fun(self, ch)
 			return True
-		return False
+		
+		return self.on_key_input(ch)
 
 	def draw(self):
 		self.screen.clear()
@@ -103,6 +99,7 @@ class window_base:
 		return True
 
 class window(window_base):
+	on_cursor_changed = None
 	def __init__(self, app, screen, colorScheme):
 		window_base.__init__(self, app, screen, colorScheme)
 
@@ -148,6 +145,9 @@ class window(window_base):
 		self.lineList.append((line, lineinfo))
 		self.dirty = True
 
+	def get_rows(self):
+		return len(self.lineList)
+
 	def get_line_info(self, lineno):
 		if lineno < len(self.lineList):
 			(line, info) = self.lineList[lineno]
@@ -183,7 +183,7 @@ class window(window_base):
 					col = curses.A_REVERSE
 				else:
 					col = self.colorScheme.get_color(color)
-				# logging.debug("line=%d,col=%d,str=%s,endCol=%d", drawLine, beginCol, str, endCol)
+				#logging.debug("line=%d,col=%d,str=%s,endCol=%d", drawLine, beginCol, str, endCol)
 				self.screen.addstr(drawLine, beginCol, str.ljust(endCol), col)
 				beginCol += endCol
 			return True
@@ -207,11 +207,15 @@ class window(window_base):
 		def clamp(val, minVal, maxVal):
 			return max(minVal, min(val, maxVal))
 
+		oldCursor  = self.cursor
 		drawRegion = self.endRow - self.beginRow
 		maxPos = len(self.lineList) - 1
 		self.cursor = clamp(self.cursor, 0, maxPos)
 		self.viewLine = clamp(self.viewLine, max(self.cursor - drawRegion + 1, 0), min(self.cursor + drawRegion - 1, maxPos - drawRegion + 1))
 		self.dirty = True
+		logging.debug("cursor=%d,oldCursor=%s", self.cursor, oldCursor)
+		if self.on_cursor_changed:
+			self.on_cursor_changed(self)
 	
 	def cursor_shift(self, shiftVal):
 		self.cursor = self.cursor + shiftVal
@@ -221,6 +225,19 @@ class window(window_base):
 			self.viewLine = self.viewLine + shiftVal
 		self.adjust_cursor()
 		self.dirty = True
+
+	def on_key_input(self, ch):
+		if ch == 'j':
+			self.cursor_shift(1)
+		elif ch == 'k':
+			self.cursor_shift(-1)
+		else:
+			#TODO: page down and page up
+			return False
+		return True
+
+	def bind_cursor_changed(self, on_changed):
+		self.on_cursor_changed = on_changed
 
 
 class color_scheme:
