@@ -23,9 +23,12 @@ def init_content_window(window):
 	global app
 	window.show(True)
 	global end_revision
+	global log_author
 	end_revision = None
+	log_author = None
 
 	def cursor_changed(win):
+		global log_author
 		cursor = win.get_cursor()
 		info = win.get_line_info(cursor)
 		if not info: return
@@ -37,14 +40,25 @@ def init_content_window(window):
 		for changePath in log.changed_paths:
 			winFileList.add_line_str(changePath.path, log=log, path=changePath.path)
 		if (win.get_rows() - win.get_cursor()) < 5:
-			cmd_log(win)
+			cmd_log(win, log_author)
+
+	def show_user_log(win):
+		cursor = win.get_cursor()
+		info = win.get_line_info(cursor)
+		if not info: return
+		log = info["log"]
+		logging.debug("show user log=%s", log.author)
+		win.clear()
+		cmd_log(win, log.author)
 
 
-	def cmd_log(win):
+	def cmd_log(win, author=None):
+		global log_author
 		global end_revision
+		log_author = author
 		#win.set_title("svn log")
 		logging.debug("cmd log")
-		logs = client.log(end_revision)
+		logs, end_revision = client.log(end_revision, log_author)
 		if not len(logs): return
 		for log in logs:
 			message = "%s %s %s"%(log.author, date_format(log.date), log.message)
@@ -54,7 +68,6 @@ def init_content_window(window):
 			line.append_region("%d"%log.revision.number, 15, "TEXT_BLUE")
 			line.append_region(log.message, 50, "TEXT_RED")
 			win.add_line(line, log=log)
-		end_revision = logs[-1].revision
 
 	def on_key_enter(win):
 		#resultWin.clear()
@@ -73,14 +86,21 @@ def init_content_window(window):
 			# logging.debug("diff_text = %s", text_line)
 			win.add_line_str(text_line)
 
+	def save_log(win):
+		win.save()
+
 	def hook(self, ch):
 		if ch == 'q':
 			app.quit()
 		elif ch == 'd':
 			cmd_log(self)
+		elif ch == 's':
+			save_log(self)
+		elif ch == 'u':
+			show_user_log(self)
 		elif ch == "KEY_ENTER":
 			on_key_enter(self)
-	window.bind_keys(['q', 'd', 'KEY_ENTER'], hook)
+	window.bind_keys(['q', 's', 'd', 'u', 'KEY_ENTER'], hook)
 	window.bind_cursor_changed(cursor_changed)
 
 def init_result_window(window):

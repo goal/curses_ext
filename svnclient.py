@@ -1,4 +1,5 @@
 import pysvn
+import logging
 
 class client:
 	username = None
@@ -16,12 +17,20 @@ class client:
 		save = False
 		return retcode, username, password, save
 
-	def log(self, end_revision):
+	def log(self, end_revision, author=None):
 		end_revision = end_revision or pysvn.Revision(pysvn.opt_revision_kind.base)
-		return self.client.log("./", limit=50, revision_end=end_revision, discover_changed_paths=True)
+		logging.debug("end_revision=%s", end_revision)
 
-	def next_log(self):
-		return self.log()
+		logs = self.client.log("./", limit=50, revision_start=end_revision, discover_changed_paths=True)
+
+		end_revision = len(logs) > 0 and logs[-1].revision
+		if not author:
+			return logs, end_revision
+		newlogs = []
+		for log in logs:
+			if log.author == author:
+				newlogs.append(log)
+		return newlogs, end_revision
 
 	def diff(self, revision1, revision2):
 		return self.client.diff("./", '.', recurse=True, revision1=revision1, revision2=revision2, diff_options=['-u'])

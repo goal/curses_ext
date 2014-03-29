@@ -19,6 +19,12 @@ class line:
 	def get_regions(self):
 		return self.regions
 
+	def serial(self):
+		result = ""
+		for (color, endCol, str) in self.regions:
+			result += str.ljust(endCol)
+		return result
+
 class window_base:
 	app = None
 	screen = None
@@ -144,6 +150,15 @@ class window(window_base):
 	def add_line(self, line, **lineinfo):
 		self.lineList.append((line, lineinfo))
 		self.dirty = True
+
+	def save(self, filename = None):
+		filename = filename or "svnview.txt"
+		f = file(filename, 'w')
+		context = ""
+		for (line, info) in self.lineList:
+			context += "%s\n"%line.serial()
+		f.write(context)
+		f.close()
 
 	def get_rows(self):
 		return len(self.lineList)
